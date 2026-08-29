@@ -15,11 +15,13 @@ APP_TITLE = "Stock Data API"
 DAILY_PERIOD = "1y"
 HOURLY_PERIOD = "60d"
 CACHE_TTL_SECONDS = 300
+RSI_PERIOD = 14
+MA_PERIODS = (5, 25, 75)
 
 app = FastAPI(
     title=APP_TITLE,
-    description="yfinanceから日足1年・1時間足60日を取得するAPI",
-    version="1.0.0",
+    description="yfinanceから日足1年・1時間足60日を取得し、RSI・移動平均を付与するAPI",
+    version="1.1.0",
 )
 
 app.add_middleware(
@@ -43,6 +45,39 @@ def normalize_ticker(code: str) -> tuple[str, str]:
     return raw, raw
 
 
+def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    close = out["Close"].astype(float)
+
+    for period in MA_PERIODS:
+        out[f"MA{period}"] = close.rolling(
+            window=period,
+            min_periods=period,
+        ).mean()
+
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(
+        alpha=1 / RSI_PERIOD,
+        adjust=False,
+        min_periods=RSI_PERIOD,
+    ).mean()
+    avg_loss = loss.ewm(
+        alpha=1 / RSI_PERIOD,
+        adjust=False,
+        min_periods=RSI_PERIOD,
+    ).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    rsi = rsi.mask((avg_loss == 0) & (avg_gain > 0), 100.0)
+    rsi = rsi.mask((avg_gain == 0) & (avg_loss > 0), 0.0)
+    rsi = rsi.mask((avg_gain == 0) & (avg_loss == 0), 50.0)
+    out[f"RSI{RSI_PERIOD}"] = rsi
+
+    return out
+
+
 def prepare_ohlcv(df: pd.DataFrame, interval: str) -> pd.DataFrame:
     if df.empty:
         raise ValueError(
@@ -55,6 +90,7 @@ def prepare_ohlcv(df: pd.DataFrame, interval: str) -> pd.DataFrame:
         raise ValueError(f"必要な列がありません: {', '.join(missing)}")
     out = df[required].copy()
     out = out.dropna(subset=["Open", "High", "Low", "Close"], how="all")
+    out = add_technical_indicators(out)
     idx = pd.DatetimeIndex(out.index)
     if interval == "1h" and idx.tz is not None:
         idx = idx.tz_convert("Asia/Tokyo").tz_localize(None)
@@ -109,6 +145,10 @@ def fetch_stock_data(code: str) -> dict[str, Any]:
         "hourly_period": HOURLY_PERIOD,
         "daily_count": len(daily),
         "hourly_count": len(hourly),
+        "indicators": {
+            "rsi": f"RSI{RSI_PERIOD}",
+            "moving_averages": [f"MA{period}" for period in MA_PERIODS],
+        },
         "daily": dataframe_to_records(daily),
         "hourly": dataframe_to_records(hourly),
     }
