@@ -13,14 +13,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 APP_TITLE = "Stock Data API"
-DAILY_PERIOD = "1y"
-HOURLY_PERIOD = "60d"
+DAILY_PERIOD = "6mo"
+HOURLY_DAYS = 20
+HOURLY_PERIOD = f"{HOURLY_DAYS}d"
 CACHE_TTL_SECONDS = 300
 
 app = FastAPI(
     title=APP_TITLE,
-    description="yfinanceから日足1年・1時間足60日を取得するAPI",
-    version="1.4.0",
+    description="yfinanceから日足6か月・1時間足20日を取得するAPI",
+    version="1.5.0",
 )
 
 app.add_middleware(
@@ -114,14 +115,24 @@ def fetch_interval_data(code: str, interval: str) -> dict[str, Any]:
             return cached[1]
 
     ticker = yf.Ticker(ticker_symbol)
-    raw = ticker.history(
-        period=period,
-        interval=interval,
-        auto_adjust=False,
-        actions=False,
-        prepost=False,
-        timeout=20,
-    )
+
+    history_kwargs: dict[str, Any] = {
+        "interval": interval,
+        "auto_adjust": False,
+        "actions": False,
+        "prepost": False,
+        "timeout": 20,
+    }
+
+    if interval == "1d":
+        history_kwargs["period"] = DAILY_PERIOD
+    else:
+        start_date = (
+            pd.Timestamp.now(tz="Asia/Tokyo") - pd.Timedelta(days=HOURLY_DAYS)
+        ).strftime("%Y-%m-%d")
+        history_kwargs["start"] = start_date
+
+    raw = ticker.history(**history_kwargs)
     data = prepare_ohlcv(raw, interval)
 
     payload = {
