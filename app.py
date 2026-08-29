@@ -10,6 +10,7 @@ import pandas as pd
 import yfinance as yf
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
 APP_TITLE = "Stock Data API"
 DAILY_PERIOD = "1y"
@@ -19,7 +20,7 @@ CACHE_TTL_SECONDS = 300
 app = FastAPI(
     title=APP_TITLE,
     description="yfinanceから日足1年・1時間足60日を取得するAPI",
-    version="1.3.0",
+    version="1.4.0",
 )
 
 app.add_middleware(
@@ -79,6 +80,19 @@ def prepare_ohlcv(df: pd.DataFrame, interval: str) -> pd.DataFrame:
 
 def dataframe_to_records(df: pd.DataFrame) -> list[dict[str, Any]]:
     return json.loads(df.to_json(orient="records", force_ascii=False))
+
+
+def pretty_json_response(payload: Any) -> Response:
+    content = json.dumps(
+        payload,
+        ensure_ascii=False,
+        indent=2,
+        allow_nan=False,
+    ) + "\n"
+    return Response(
+        content=content,
+        media_type="application/json",
+    )
 
 
 def fetch_interval_data(code: str, interval: str) -> dict[str, Any]:
@@ -141,9 +155,9 @@ def fetch_stock_data(code: str) -> dict[str, Any]:
     }
 
 
-def handle_api_request(fetcher: Any, *args: Any) -> dict[str, Any]:
+def handle_api_request(fetcher: Any, *args: Any) -> Response:
     try:
-        return fetcher(*args)
+        return pretty_json_response(fetcher(*args))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -154,31 +168,33 @@ def handle_api_request(fetcher: Any, *args: Any) -> dict[str, Any]:
 
 
 @app.get("/")
-def root() -> dict[str, str]:
-    return {
-        "message": "Stock Data API is running",
-        "daily_example": "/api/stock/7186/daily",
-        "hourly_example": "/api/stock/7186/hourly",
-        "combined_example": "/api/stock/7186",
-        "docs": "/docs",
-    }
+def root() -> Response:
+    return pretty_json_response(
+        {
+            "message": "Stock Data API is running",
+            "daily_example": "/api/stock/7186/daily",
+            "hourly_example": "/api/stock/7186/hourly",
+            "combined_example": "/api/stock/7186",
+            "docs": "/docs",
+        }
+    )
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> Response:
+    return pretty_json_response({"status": "ok"})
 
 
 @app.get("/api/stock/{code}/daily")
-def get_stock_daily(code: str) -> dict[str, Any]:
+def get_stock_daily(code: str) -> Response:
     return handle_api_request(fetch_interval_data, code, "1d")
 
 
 @app.get("/api/stock/{code}/hourly")
-def get_stock_hourly(code: str) -> dict[str, Any]:
+def get_stock_hourly(code: str) -> Response:
     return handle_api_request(fetch_interval_data, code, "1h")
 
 
 @app.get("/api/stock/{code}")
-def get_stock(code: str) -> dict[str, Any]:
+def get_stock(code: str) -> Response:
     return handle_api_request(fetch_stock_data, code)
