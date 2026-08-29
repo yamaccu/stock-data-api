@@ -20,8 +20,8 @@ CACHE_TTL_SECONDS = 300
 
 app = FastAPI(
     title=APP_TITLE,
-    description="yfinanceから日足6か月・1時間足20日を取得するAPI。daily/hourlyはCSV形式で返却。",
-    version="1.6.0",
+    description="yfinanceから日足6か月・1時間足20日を取得するAPI。daily/hourlyはCSV形式のプレーンテキストで返却。",
+    version="1.7.0",
 )
 
 app.add_middleware(
@@ -96,15 +96,12 @@ def pretty_json_response(payload: Any) -> Response:
     )
 
 
-def csv_response(payload: dict[str, Any]) -> Response:
+def text_table_response(payload: dict[str, Any]) -> Response:
     df = pd.DataFrame(payload["data"])
     content = df.to_csv(index=False, lineterminator="\n")
     return Response(
         content=content,
-        media_type="text/csv",
-        headers={
-            "Content-Disposition": f'inline; filename="{payload["code"]}_{payload["interval"]}.csv"'
-        },
+        media_type="text/plain; charset=utf-8",
     )
 
 
@@ -190,9 +187,9 @@ def handle_json_request(fetcher: Any, *args: Any) -> Response:
         ) from exc
 
 
-def handle_csv_request(code: str, interval: str) -> Response:
+def handle_text_request(code: str, interval: str) -> Response:
     try:
-        return csv_response(fetch_interval_data(code, interval))
+        return text_table_response(fetch_interval_data(code, interval))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -209,7 +206,7 @@ def root() -> Response:
             "message": "Stock Data API is running",
             "daily_example": "/api/stock/7186/daily",
             "hourly_example": "/api/stock/7186/hourly",
-            "daily_hourly_format": "CSV",
+            "daily_hourly_format": "plain text (CSV-formatted)",
             "combined_example": "/api/stock/7186",
             "combined_format": "JSON",
             "docs": "/docs",
@@ -224,12 +221,12 @@ def health() -> Response:
 
 @app.get("/api/stock/{code}/daily")
 def get_stock_daily(code: str) -> Response:
-    return handle_csv_request(code, "1d")
+    return handle_text_request(code, "1d")
 
 
 @app.get("/api/stock/{code}/hourly")
 def get_stock_hourly(code: str) -> Response:
-    return handle_csv_request(code, "1h")
+    return handle_text_request(code, "1h")
 
 
 @app.get("/api/stock/{code}")
